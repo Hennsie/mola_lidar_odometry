@@ -205,6 +205,12 @@ struct Cli
     "",    "input-rosbag2", "INPUT DATASET: rosbag2. Input dataset in rosbag2 format {*.mcap}",
     false, "dataset.mcap",  "dataset.mcap",
     cmd};
+  TCLAP::ValueArg<std::string> argRosbagConfig{
+    "",    "rosbag_config",
+    "Path to an optional YAML configuration file for the rosbag2 data source. "
+    "Settings in this file will override default-generated ones. Igonring all label settings.",
+    false, "rosbag-config.yml", "rosbag-config.yml",
+    cmd};
 #endif
 
 #if defined(HAVE_MOLA_INPUT_KITTI)
@@ -300,18 +306,45 @@ std::shared_ptr<mola::OfflineDatasetSource> dataset_from_mulran(
 
 #if defined(HAVE_MOLA_INPUT_ROSBAG2)
 std::shared_ptr<mola::OfflineDatasetSource> dataset_from_rosbag2(
-  Cli & cli, const std::string & rosbag2file, const mrpt::system::VerbosityLevel logLevel)
+    Cli& cli, const std::string& rosbag2file,
+    const mrpt::system::VerbosityLevel logLevel)
 {
-  ASSERTMSG_(
-    cli.arg_lidarLabel.isSet(),
-    "Using a rosbag2 as input requires telling what is the lidar topic "
-    "with --lidar-sensor-label <TOPIC_NAME>");
+    auto o = std::make_shared<mola::Rosbag2Dataset>();
+    o->setMinLoggingLevel(logLevel);
 
-  auto o = std::make_shared<mola::Rosbag2Dataset>();
-  o->setMinLoggingLevel(logLevel);
+    // This will hold the final configuration, loaded one of two ways:
+    mola::Yaml cfg;
 
-  const auto cfg = mola::Yaml::FromText(mola::parse_yaml(mrpt::format(
-    R""""(
+    if (cli.argRosbagConfig.isSet())
+    {
+        // 1. Config file IS provided: Load it directly.
+        const std::string config_file = cli.argRosbagConfig.getValue();
+        std::cout << "Loading rosbag2 config from user file: " << config_file
+                  << std::endl;
+
+        // Load the YAML file from disk
+        auto user_yaml = mrpt::containers::yaml::FromFile(config_file);
+
+        // Overwrite the rosbag_filename from the command line,
+        // as it's more convenient than forcing the user to edit the file.
+        user_yaml["params"]["rosbag_filename"] = rosbag2file;
+
+        cfg = mola::Yaml::FromText(user_yaml);
+    }
+    else
+    {
+        // 2. No config file: Use the default implementation.
+        ASSERTMSG_(
+            cli.arg_lidarLabel.isSet(),
+            "Using a rosbag2 as input (without --rosbag-config) requires "
+            "telling what is the lidar topic with --lidar-sensor-label "
+            "<TOPIC_NAME>");
+
+        std::cout << "Using default rosbag2 config generated from CLI arguments."
+                  << std::endl;
+
+        cfg = mola::Yaml::FromText(mola::parse_yaml(mrpt::format(
+            R""""(
     params:
       rosbag_filename: '%s'
       base_link_frame_id: '%s'
@@ -332,12 +365,15 @@ std::shared_ptr<mola::OfflineDatasetSource> dataset_from_rosbag2(
           fixed_sensor_pose: "${IMU_POSE_X|0} ${IMU_POSE_Y|0} ${IMU_POSE_Z|0} ${IMU_POSE_YAW|0} ${IMU_POSE_PITCH|0} ${IMU_POSE_ROLL|0}" # 'x y z yaw_deg pitch_deg roll_deg''
           use_fixed_sensor_pose: ${MOLA_USE_FIXED_IMU_POSE|false}
 )"""",
-    rosbag2file.c_str(), cli.arg_baseLinkName.getValue().c_str(),
-    cli.arg_lidarLabel.getValue().c_str(), cli.arg_imuLabel.getValue().c_str())));
+            rosbag2file.c_str(), cli.arg_baseLinkName.getValue().c_str(),
+            cli.arg_lidarLabel.getValue().c_str(),
+            cli.arg_imuLabel.getValue().c_str())));
+    }
 
-  o->initialize(cfg);
+    // Initialize the module with the configuration (from either path)
+    o->initialize(cfg);
 
-  return o;
+    return o;
 }
 #endif
 
