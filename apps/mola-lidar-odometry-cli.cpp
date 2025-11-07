@@ -329,7 +329,7 @@ std::shared_ptr<mola::OfflineDatasetSource> dataset_from_rosbag2(
         // as it's more convenient than forcing the user to edit the file.
         user_yaml["params"]["rosbag_filename"] = rosbag2file;
 
-        cfg = mola::Yaml::FromText(user_yaml);
+        cfg = mola::parse_yaml(user_yaml);
     }
     else
     {
